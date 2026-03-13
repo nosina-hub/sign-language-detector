@@ -694,6 +694,25 @@
         }
     </style>
 </head>
+<script>
+    function speakText(text) {
+        // This tells the browser: "Hey, say this word out loud!"
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0; // Normal speed
+        window.speechSynthesis.speak(utterance);
+    }
+
+    // Example of how to trigger it when you get data from Python
+    function checkSign() {
+        fetch('/get_sign')
+            .then(response => response.json())
+            .then(data => {
+                if (data.prediction) {
+                    speakText(data.prediction);
+                }
+            });
+    }
+</script>
 
 <body>
     <header>
