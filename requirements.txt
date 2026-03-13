@@ -1,6 +1,7 @@
+flask
+flask-cors
+gunicorn
 opencv-python-headless
 mediapipe
 scikit-learn
 numpy
-gunicorn
-flask
