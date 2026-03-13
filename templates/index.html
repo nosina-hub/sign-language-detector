@@ -5,7 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SignBridge - ASL Translator</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Offline Support: Try local Font Awesome first, then CDN -->
+    <link rel="stylesheet" href="static/css/font-awesome.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" onerror="this.onerror=null; this.href='static/css/font-awesome.min.css'">
     <style>
         * {
             margin: 0;
@@ -85,6 +87,25 @@
         .logo p {
             font-size: 0.75rem;
             color: var(--text-muted);
+        }
+
+        /* Network Status Indicator */
+        .network-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .network-status.online {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--success);
+        }
+        .network-status.offline {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
         }
 
         /* Navigation Tabs */
@@ -637,6 +658,33 @@
             font-size: 4rem;
         }
 
+        .emergency-content {
+            text-align: center;
+            color: white;
+        }
+        .emergency-content i {
+            font-size: 5rem;
+            margin-bottom: 20px;
+            animation: pulse 1s infinite;
+        }
+        .emergency-content h2 {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+        }
+        .emergency-content p {
+            font-size: 2rem;
+        }
+        .emergency-content .emergency-hint {
+            font-size: 1rem;
+            opacity: 0.8;
+            margin-top: 20px;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
         /* Practice Mode Dropdown */
         .practice-select {
             padding: 12px 20px;
@@ -694,25 +742,6 @@
         }
     </style>
 </head>
-<script>
-    function speakText(text) {
-        // This tells the browser: "Hey, say this word out loud!"
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1.0; // Normal speed
-        window.speechSynthesis.speak(utterance);
-    }
-
-    // Example of how to trigger it when you get data from Python
-    function checkSign() {
-        fetch('/get_sign')
-            .then(response => response.json())
-            .then(data => {
-                if (data.prediction) {
-                    speakText(data.prediction);
-                }
-            });
-    }
-</script>
 
 <body>
     <header>
@@ -729,13 +758,13 @@
                     <i class="fas fa-camera"></i> Translate
                 </button>
                 <button class="nav-tab" data-tab="cards">
-                    <i class="fas fa-cards"></i> Cards
+                    <i class="fas fa-layer-group"></i> Cards
                 </button>
                 <button class="nav-tab" data-tab="chat">
                     <i class="fas fa-comments"></i> Chat
                 </button>
                 <button class="nav-tab" data-tab="practice">
-                    <i class="fas fa-dumbbell"></i> Practice
+                    <i class="fas fa-person-rays"></i> Practice
                 </button>
                 <button class="nav-tab" data-tab="learn">
                     <i class="fas fa-graduation-cap"></i> Learn
@@ -744,6 +773,9 @@
                     <i class="fas fa-plus-circle"></i> Collect
                 </button>
             </nav>
+            <div class="network-status online" id="networkStatus">
+                <i class="fas fa-wifi"></i> <span id="networkText">Online</span>
+            </div>
         </div>
     </header>
 
@@ -876,6 +908,10 @@
                     <div class="practice-target">
                         <p style="color: var(--text-muted);">Show this sign:</p>
                         <div class="practice-target-sign" id="practiceTargetSign">?</div>
+                        <div class="confidence-bar" style="margin-top: 1rem;">
+                            <div class="confidence-fill" id="practiceConfidenceFill" style="width: 0%"></div>
+                        </div>
+                        <div class="confidence-text" id="practiceConfidenceText">Confidence: 0%</div>
                         <div class="practice-feedback" id="practiceFeedback" style="display: none;"></div>
                     </div>
 
@@ -1082,14 +1118,23 @@
         };
 
         // Emergency Signs
-        const EMERGENCY_SIGNS = ["HELP", "SICK", "FIRE", "DANGER", "PAIN", "CALL DOCTOR"];
-
-
         // Configuration
         const API_ENDPOINT = '/predict';
-        const DETECTION_INTERVAL = 33; // Match training framerate (30 FPS)
+        const DETECTION_INTERVAL = 200; // Reduced from 100ms - gives Flask more time, reduces CPU
         const CONFIDENCE_THRESHOLD = 30; // Show visual feedback for 30%+
         const COOLDOWN_TIME = 2500; // Cooldown before same sign can be added again
+        
+        // Frame Skipping - Process every Nth frame to reduce CPU load
+        const FRAME_SKIP = 2; // Process every 2nd frame (15 FPS effective)
+        let frameCounter = 0;
+        
+        // Confidence Smoothing - Average predictions over time to reduce jitter
+        const SMOOTHING_WINDOW = 5; // Average over last 5 predictions
+        let predictionHistory = [];
+        
+        // Emergency Mode
+        let emergencyModeActive = false;
+        const EMERGENCY_SIGNS = ["HELP", "SICK", "FIRE", "DANGER", "PAIN", "CALL DOCTOR", "HURT", "WATER", "THIRSTY", "HUNGRY"];
 
         // Model knows these 25 signs (all 50 samples each)
         const MODEL_SIGNS = [
@@ -1120,6 +1165,24 @@
         // Canvas for frame capture
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
+
+        // ============================================
+        // Network Status (Offline Support)
+        // ============================================
+        function updateNetworkStatus() {
+            const statusEl = document.getElementById('networkStatus');
+            const textEl = document.getElementById('networkText');
+            if (navigator.onLine) {
+                statusEl.className = 'network-status online';
+                statusEl.innerHTML = '<i class="fas fa-wifi"></i> <span>Online</span>';
+            } else {
+                statusEl.className = 'network-status offline';
+                statusEl.innerHTML = '<i class="fas fa-wifi"></i> <span>Offline</span>';
+            }
+        }
+        window.addEventListener('online', updateNetworkStatus);
+        window.addEventListener('offline', updateNetworkStatus);
+        updateNetworkStatus();
 
         // ============================================
         // Tab Navigation
@@ -1210,15 +1273,21 @@
         }
 
         // ============================================
-        // Detection Loop
+        // Detection Loop with Frame Skipping
         // ============================================
         async function detectionLoop() {
             if (!isDetecting || !videoElement || videoElement.readyState !== 4) {
-                if (isDetecting) setTimeout(detectionLoop, 33); // 30 FPS
+                if (isDetecting) setTimeout(detectionLoop, 33);
                 return;
             }
 
-            console.log("Sending frame for detection...");
+            // Frame Skipping: Only process every Nth frame
+            frameCounter++;
+            if (frameCounter % FRAME_SKIP !== 0) {
+                // Skip this frame, but still schedule next check
+                if (isDetecting) setTimeout(detectionLoop, DETECTION_INTERVAL / FRAME_SKIP);
+                return;
+            }
 
             canvas.width = videoElement.videoWidth;
             canvas.height = videoElement.videoHeight;
@@ -1234,13 +1303,10 @@
                         body: formData
                     });
                     const data = await response.json();
-                    console.log("Response:", data);
                     handlePrediction(data);
                 } catch (err) {
                     console.error('Detection error:', err);
-                    alert('Error: ' + err.message);
                 } finally {
-                    // Send next frame after delay
                     if (isDetecting) {
                         setTimeout(detectionLoop, DETECTION_INTERVAL);
                     }
@@ -1249,14 +1315,13 @@
         }
 
         function handlePrediction(data) {
-            console.log("Handle prediction:", data);
             const badge = document.getElementById('statusBadge');
-
-            // Practice mode check
+            if (data.error) { console.error("Flask Backend Error:", data.error); }
+            
             if (isPracticeMode) {
                 checkPracticeResult(data);
             }
-
+            
             if (!data.detected) {
                 badge.innerHTML = '<i class="fas fa-eye-slash"></i> No hand detected';
                 badge.className = 'status-badge not-detected';
@@ -1264,12 +1329,39 @@
                 document.getElementById('confidenceFill').style.width = '0%';
                 document.getElementById('confidenceText').textContent = 'Confidence: 0%';
                 document.getElementById('topPredictions').innerHTML = '';
+                // Clear prediction history when no hand detected
+                predictionHistory = [];
                 return;
             }
 
-            // Hand is detected! Let's update confidence no matter what.
-            const confidence = data.confidence || 0;
-            const sign = data.prediction || "Thinking...";
+            // Confidence Smoothing: Add to history and compute weighted average
+            if (data.predictions && data.confidences && data.predictions.length > 0) {
+                predictionHistory.push({
+                    predictions: data.predictions,
+                    confidences: data.confidences,
+                    rawConfidence: data.confidence
+                });
+                // Keep only last N predictions
+                if (predictionHistory.length > SMOOTHING_WINDOW) {
+                    predictionHistory.shift();
+                }
+            }
+            
+            // Compute smoothed confidence
+            let confidence = data.confidence || 0;
+            let sign = data.prediction || "Thinking...";
+            
+            // If we have enough history, smooth the prediction
+            if (predictionHistory.length >= 3 && sign) {
+                // Check if top prediction is consistent across history
+                const topSigns = predictionHistory.map(h => h.predictions[0]).filter(s => s === sign);
+                const consistency = topSigns.length / predictionHistory.length;
+                
+                // Boost confidence if prediction is consistent
+                if (consistency > 0.6) {
+                    confidence = Math.min(95, confidence + (consistency * 20));
+                }
+            }
 
             document.getElementById('confidenceFill').style.width = confidence + '%';
             document.getElementById('confidenceText').textContent = `Confidence: ${Math.round(confidence)}%`;
@@ -1358,16 +1450,45 @@
         }
 
         // ============================================
-        // Emergency Mode
+        // Emergency Mode (Enhanced)
         // ============================================
         function triggerEmergency(sign) {
             document.body.classList.add('emergency');
+            emergencyModeActive = true;
+            
+            // Create prominent alert overlay
+            const alertDiv = document.createElement('div');
+            alertDiv.id = 'emergencyAlert';
+            alertDiv.innerHTML = `
+                <div class="emergency-content">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h2>EMERGENCY</h2>
+                    <p>Person needs: <strong>${sign}</strong></p>
+                    <p class="emergency-hint">This is an automated accessibility alert</p>
+                </div>
+            `;
+            alertDiv.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(220, 38, 38, 0.95);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 99999;
+            `;
+            document.body.appendChild(alertDiv);
+            
             const message = `Emergency! This person needs ${sign}!`;
             speakText(message);
 
             setTimeout(() => {
                 document.body.classList.remove('emergency');
-            }, 5000);
+                emergencyModeActive = false;
+                if (alertDiv.parentNode) alertDiv.parentNode.removeChild(alertDiv);
+            }, 8000);
         }
 
         // ============================================
@@ -1491,6 +1612,8 @@
             isPracticeMode = false;
             document.getElementById('practiceFeedback').style.display = 'none';
             document.getElementById('practiceTargetSign').textContent = '?';
+            document.getElementById('practiceConfidenceFill').style.width = '0%';
+            document.getElementById('practiceConfidenceText').textContent = 'Confidence: 0%';
 
             if (cameraStream) {
                 cameraStream.getTracks().forEach(track => track.stop());
@@ -1509,6 +1632,11 @@
             const predictedSign = data.prediction;
             const confidence = data.confidence || 0;
             const feedback = document.getElementById('practiceFeedback');
+            
+            // Update confidence bar
+            document.getElementById('practiceConfidenceFill').style.width = confidence + '%';
+            document.getElementById('practiceConfidenceText').textContent = `Confidence: ${Math.round(confidence)}%`;
+            
             feedback.style.display = 'block';
 
             // If it's buffering or no prediction yet

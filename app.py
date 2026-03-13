@@ -15,10 +15,11 @@ from collections import deque
 app = Flask(__name__)
 CORS(app)
 
-MODELS_DIR = Path("models")
-DATA_DIR = Path("data")
-MODEL_PATH = Path("model.pkl")
-LABELS_PATH = Path("labels.pkl")
+BASE_DIR = Path(__file__).parent.absolute()
+MODELS_DIR = BASE_DIR / "models"
+DATA_DIR = BASE_DIR / "data"
+MODEL_PATH = BASE_DIR / "model.pkl"
+LABELS_PATH = BASE_DIR / "labels.pkl"
 HAND_MODEL_PATH = MODELS_DIR / "hand_landmarker.task"
 POSE_MODEL_PATH = MODELS_DIR / "pose_landmarker_lite.task"
 
@@ -29,6 +30,10 @@ frame_buffer = deque(maxlen=30)
 SEQUENCE_LENGTH = 30
 last_prediction_time = 0
 PREDICTION_INTERVAL = 2.0  # seconds - same as desktop translator
+
+# Global state variables for prediction
+frames_since_last_hand = 0
+prediction_history = deque(maxlen=10)
 
 # All supported signs
 ALL_SIGNS = [
@@ -51,8 +56,8 @@ base_options = mp_tasks.BaseOptions(model_asset_path=str(HAND_MODEL_PATH))
 hand_options = vision.HandLandmarkerOptions(
     base_options=base_options,
     num_hands=2,
-    min_hand_detection_confidence=0.3,
-    min_tracking_confidence=0.3
+    min_hand_detection_confidence=0.2,  # Lowered for better detection
+    min_tracking_confidence=0.2  # Lowered for better tracking
 )
 hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
 
@@ -60,8 +65,8 @@ hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
 pose_base_options = mp_tasks.BaseOptions(model_asset_path=str(POSE_MODEL_PATH))
 pose_options = vision.PoseLandmarkerOptions(
     base_options=pose_base_options,
-    min_pose_detection_confidence=0.3,
-    min_tracking_confidence=0.3
+    min_pose_detection_confidence=0.2,  # Lowered for better detection
+    min_tracking_confidence=0.2  # Lowered for better tracking
 )
 pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
 print("MediaPipe models loaded!")
@@ -146,10 +151,6 @@ def index():
 @app.route("/api/predict", methods=["POST"])
 def predict():
     global frame_buffer, last_prediction_time, prediction_history, frames_since_last_hand
-    if 'frames_since_last_hand' not in globals():
-        frames_since_last_hand = 0
-    if 'prediction_history' not in globals():
-        prediction_history = deque(maxlen=10)
     
     if classifier is None:
         return jsonify({"detected": False, "error": "Train model first"})
@@ -243,12 +244,12 @@ def predict():
         
         top_idx = np.argsort(smoothed_probs)[-3:][::-1]
         
-        # If the highest probability is too low, we classify it as 'Unknown'/Low Confidence
-        if max_prob < 0.4:
+        # Lowered threshold for better detection - show predictions even at lower confidence
+        if max_prob < 0.25:
             print(f"[-] Low confidence prediction: {labels[pred_idx]} ({confidence:.1f}%)")
             response = {
                 "detected": True,
-                "prediction": "",
+                "prediction": "",  # Still show but mark as uncertain
                 "confidence": confidence,
                 "predictions": [str(labels[i]) for i in top_idx],
                 "confidences": [float(smoothed_probs[i] * 100) for i in top_idx],

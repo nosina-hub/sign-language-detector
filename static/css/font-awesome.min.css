@@ -1,0 +1,7 @@
+/* Offline Font Awesome Placeholder */
+/* Download Font Awesome from https://fontawesome.com and place the css here */
+/* For offline use, copy the content of all.min.css from Font Awesome package */
+.fas, .fab, .far, .fal, .fad, .stack-icon {
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+}

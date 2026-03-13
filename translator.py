@@ -136,6 +136,10 @@ HAND_CONNECTIONS = [
     (5, 9), (9, 13), (13, 17),
 ]
 
+# Upper-body pose landmark indices (same as collect_data.py):
+# shoulders (11, 12), elbows (13, 14), wrists (15, 16)
+UPPER_BODY_INDICES = [11, 12, 13, 14, 15, 16]
+
 # Upper-body pose connections for manual drawing
 # Only draw connections between the upper-body landmarks we use
 POSE_UPPER_CONNECTIONS = [
@@ -226,11 +230,6 @@ def draw_overlay(image, text, confidence, sentence, fps, sample_feedback=""):
 # ---------------------------------------------------------------------------
 # Landmark extraction
 # ---------------------------------------------------------------------------
-
-# Upper-body pose landmark indices (same as collect_data.py):
-# shoulders (11, 12), elbows (13, 14), wrists (15, 16)
-UPPER_BODY_INDICES = [11, 12, 13, 14, 15, 16]
-
 
 def extract_landmarks(hand_result, pose_result) -> np.ndarray:
     """
@@ -373,7 +372,7 @@ def main():
     prev_time = time.time()
     fps = 0.0
 
-    CONFIDENCE_THRESHOLD = 0.35
+    CONFIDENCE_THRESHOLD = 0.25  # Lowered for better detection
     REPEAT_COOLDOWN = 1.5  # seconds before same sign can be added again
 
     print("Starting translator. Press Q to quit.")
