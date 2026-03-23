@@ -17,6 +17,7 @@ Scikit-learn
 HTML, CSS, JavaScript
 
 📁 Project Structure
+
 sign-bridge/
 ├── app.py
 ├── translator.py
