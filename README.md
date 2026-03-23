@@ -17,20 +17,29 @@ Sign Bridge is a real-time, offline-first sign language translator using compute
 - Scikit-learn
 - HTML, CSS, JavaScript
 
- 📁 Project Structure
+## 📁 Project Structure
+
+```
 sign-bridge/
 ├── app.py
 ├── translator.py
 ├── model.pkl
 ├── labels.pkl
 ├── static/
-│ ├── css/style.css
-│ └── js/script.js
+│   ├── css/style.css
+│   └── js/script.js
 └── templates/index.html
+```
 
 
-⚙️ Installation & Setup
 
+
+
+---
+
+## ⚙️ Installation & Setup
+
+```bash
 git clone https://github.com/your-username/sign-bridge.git
 cd sign-bridge
 pip install flask opencv-python mediapipe scikit-learn
